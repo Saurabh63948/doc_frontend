@@ -2,24 +2,22 @@
 import Dashboard from "@/components/Dashboard";
 import EraserEditor from "@/components/EraserEditor";
 import { useAuth } from "@/context/AuthContext";
-import { useRouter } from "next/router";
 import { useState } from "react";
+import LoginPage from "./login/page";
 
 export default function MainApp() {
   const { user } = useAuth();
-  const router = useRouter();
+
   const [view, setView] = useState("dashboard");
   const [activeFile, setActiveFile] = useState(null);
 
  
 
- useEffect(() => {
-    if (!user) {
-      router.push("/login"); 
-    }
-  }, [user, router]);
-
-  if (!user) return null; 
+  if (!user) return (
+    <>
+    <LoginPage/>
+    </>
+  )
 
   const handleFileSelect = (file) => {
     setActiveFile(file);
