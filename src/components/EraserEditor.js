@@ -1,4 +1,5 @@
 "use client";
+
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Share2, Sparkles, Zap, ChevronLeft,
@@ -8,6 +9,7 @@ import {
   Save, CheckCircle2, Loader2
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "https://doc-backend-ouhr.onrender.com";
 
@@ -130,9 +132,8 @@ export default function EraserEditor({ file, onBack }) {
   const [selectedIdx, setSelectedIdx] = useState(null);
   const [ctxMenu, setCtxMenu]         = useState(null);
   const [inlineText, setInlineText]   = useState(null);
-
-
   const [saveStatus, setSaveStatus]   = useState("idle");
+
 
   const canvasRef      = useRef(null);
   const isDrawing      = useRef(false);
@@ -141,7 +142,7 @@ export default function EraserEditor({ file, onBack }) {
   const inlineInputRef = useRef(null);
   const shapesRef      = useRef(shapes);
   const selectedIdxRef = useRef(selectedIdx);
-
+  // Ref to the document contentEditable div so we can read its HTML for saving
   const docBodyRef     = useRef(null);
   // Debounce timer for auto-save
   const saveTimer      = useRef(null);
@@ -153,8 +154,10 @@ export default function EraserEditor({ file, onBack }) {
     if (docBodyRef.current && file?.doc_content) {
       docBodyRef.current.innerHTML = file.doc_content;
     }
-  }, []); 
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Called whenever shapes change or document content changes.
+  // We debounce by 2 seconds so we don't hammer the DB on every keystroke/draw.
   const scheduleSave = useCallback(() => {
     setSaveStatus("unsaved");
     clearTimeout(saveTimer.current);
@@ -189,7 +192,6 @@ export default function EraserEditor({ file, onBack }) {
     if (shapes.length > 0 || saveStatus === "unsaved") scheduleSave();
   }, [shapes]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  
   const redrawAllRef = useRef(() => {});
 
   const resizeCanvas = useCallback(() => {
@@ -219,10 +221,19 @@ export default function EraserEditor({ file, onBack }) {
   useEffect(() => { redrawAll(); }, [shapes, selectedIdx]);
 
   useEffect(() => {
-    if (inlineText && inlineInputRef.current) inlineInputRef.current.focus();
+    if (inlineText && inlineInputRef.current) {
+      // Use rAF to ensure the textarea is painted before focusing
+      requestAnimationFrame(() => {
+        if (inlineInputRef.current) {
+          inlineInputRef.current.focus();
+          // Move cursor to end of existing text (for edit mode)
+          const len = inlineInputRef.current.value.length;
+          inlineInputRef.current.setSelectionRange(len, len);
+        }
+      });
+    }
   }, [inlineText]);
 
-  
   function drawShape(ctx, shape, isSelected = false) {
     ctx.save();
     ctx.strokeStyle = isSelected ? "#60a5fa" : "#3b82f6";
@@ -295,7 +306,6 @@ export default function EraserEditor({ file, onBack }) {
     pts.forEach(([hx, hy]) => { ctx.beginPath(); ctx.arc(hx, hy, 4, 0, Math.PI * 2); ctx.fill(); });
   }
 
-  
   function hitTest(pos) {
     for (let i = shapes.length - 1; i >= 0; i--) {
       const s = shapes[i];
@@ -328,13 +338,17 @@ export default function EraserEditor({ file, onBack }) {
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
-  
   function handleMouseDown(e) {
     if (e.button !== 0) return;
     setCtxMenu(null);
     const pos = getPos(e);
     if (activeTool === "select") { setSelectedIdx(hitTest(pos)); return; }
-    if (activeTool === "text")   { setInlineText({ x: pos.x, y: pos.y, value: "" }); return; }
+    if (activeTool === "text") {
+      // Prevent canvas from taking focus so the textarea can receive it
+      e.preventDefault();
+      setInlineText({ x: pos.x, y: pos.y, value: "" });
+      return;
+    }
     isDrawing.current = true;
     startPos.current  = pos;
     if (activeTool === "pen") currentPath.current = [pos];
@@ -390,7 +404,6 @@ export default function EraserEditor({ file, onBack }) {
     if (s) setShapes(prev => [...prev, s]); // triggers useEffect → scheduleSave
   }
 
-
   function handleContextMenu(e) {
     e.preventDefault();
     const pos = getPos(e);
@@ -444,9 +457,10 @@ export default function EraserEditor({ file, onBack }) {
       }
     }
     setInlineText(null);
+    // Switch back to select after placing text so user can move/edit it right away
+    if (!inlineText?.editIdx) setActiveTool("select");
   }
 
-  
   useEffect(() => {
     function onKey(e) {
       if ((e.key === "Delete" || e.key === "Backspace") && selectedIdxRef.current !== null) {
@@ -462,7 +476,6 @@ export default function EraserEditor({ file, onBack }) {
 
   function clearCanvas() { setShapes([]); setSelectedIdx(null); }
 
-  
   const tools = [
     { id:"select", icon:MousePointer2 },
     { id:"rect",   icon:Square        },
@@ -481,7 +494,7 @@ export default function EraserEditor({ file, onBack }) {
       className="flex flex-col h-screen bg-[#121212] text-[#e0e0e0] font-sans overflow-hidden"
       onClick={() => setCtxMenu(null)}
     >
-      {/*  NAVBAR */}
+      {/* ── NAVBAR ─*/}
       <nav className="h-12 border-b border-gray-800 flex items-center justify-between px-4 bg-[#1a1a1a] z-50 flex-shrink-0">
         <div className="flex items-center gap-3">
           <button
@@ -538,6 +551,8 @@ export default function EraserEditor({ file, onBack }) {
           </button>
         </div>
       </nav>
+
+      {/* ── CONTENT */}
       <div className="flex flex-1 overflow-hidden">
 
         {/* Document panel */}
@@ -563,6 +578,13 @@ export default function EraserEditor({ file, onBack }) {
                     }
                   }}
                 />
+                {/*
+                  Document body — contentEditable.
+                  We attach a ref so saveToServer() can read innerHTML.
+                  onInput fires scheduleSave on every keystroke.
+                  Initial content is set via useEffect (not dangerouslySetInnerHTML)
+                  so React doesn't wipe user edits on re-renders.
+                */}
                 <div
                   ref={docBodyRef}
                   contentEditable
@@ -634,26 +656,43 @@ export default function EraserEditor({ file, onBack }) {
               onDoubleClick={handleDoubleClick}
             />
 
-            {/* Inline text input */}
+            {/* Inline text input — sits ABOVE the canvas (z-40) */}
             {inlineText && (
-              <input
+              <textarea
                 ref={inlineInputRef}
+                autoFocus
                 value={inlineText.value}
-                onChange={e => setInlineText(t => ({ ...t, value: e.target.value }))}
+                rows={1}
+                onChange={e => {
+                  setInlineText(t => ({ ...t, value: e.target.value }));
+                  // auto-grow rows
+                  e.target.style.height = "auto";
+                  e.target.style.height = e.target.scrollHeight + "px";
+                }}
                 onBlur={commitInlineText}
                 onKeyDown={e => {
-                  if (e.key === "Enter") { e.preventDefault(); commitInlineText(); }
-                  if (e.key === "Escape") setInlineText(null);
+                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitInlineText(); }
+                  if (e.key === "Escape") { setInlineText(null); }
                 }}
-                placeholder="Type here..."
-                className="absolute bg-transparent border-b-2 border-blue-400 outline-none text-white placeholder-gray-600"
+                onMouseDown={e => e.stopPropagation()}
+                placeholder="Type here…"
+                className="absolute outline-none text-white placeholder-gray-500 resize-none overflow-hidden"
                 style={{
                   left: inlineText.x,
-                  top:  inlineText.y - 2,
+                  top:  inlineText.y,
                   fontSize: "15px",
-                  minWidth: "130px",
-                  zIndex: 30,
+                  lineHeight: "1.5",
+                  minWidth: "160px",
+                  maxWidth: "320px",
+                  zIndex: 40,
+                  background: "rgba(15,15,25,0.85)",
+                  border: "1.5px solid #3b82f6",
+                  borderRadius: "6px",
+                  padding: "6px 10px",
                   caretColor: "#60a5fa",
+                  color: "#e0e0e0",
+                  backdropFilter: "blur(4px)",
+                  boxShadow: "0 0 0 3px rgba(59,130,246,0.2)",
                 }}
               />
             )}
