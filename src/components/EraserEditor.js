@@ -1,27 +1,5 @@
 "use client";
 
-/**
- * EraserEditor — Upgraded (Zero new packages needed)
- * ─────────────────────────────────────────────────────
- * ✅ npm install NOT required — no new deps
- * ✅ Works on Vercel / Next.js with NO SSR issues
- * ✅ Single file, drop-in replacement for original EraserEditor.js
- *
- * Canvas upgrades:
- *  • Drag shapes to move
- *  • 8-handle resize on selected shape
- *  • Diamond shape tool
- *  • Zoom (scroll wheel) + Pan (middle-click or Space+drag)
- *  • Undo / Redo  (Ctrl+Z / Ctrl+Y)
- *  • Per-shape color via floating Properties panel
- *  • Shift-drag for perfect squares / circles
- *  • Keyboard shortcuts: V R O D A P T | Del | Ctrl+Z/Y
- *
- * Doc editor upgrades:
- *  • 5 toolbar groups: format / headings / align / lists / extras
- *  • Underline, code, link, highlight buttons
- *  • Font size + text color
- */
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
@@ -35,7 +13,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
-// ─── API ──────────────────────────────────────────────────────────────────────
+
 const BASE = process.env.NEXT_PUBLIC_API_URL || "https://doc-backend-ouhr.onrender.com";
 async function apiFetch(path, token, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
@@ -46,7 +24,7 @@ async function apiFetch(path, token, options = {}) {
   return res.json();
 }
 
-// ─── Misc helpers ─────────────────────────────────────────────────────────────
+
 function uid() { return Math.random().toString(36).slice(2, 10); }
 
 const PALETTE = ["#3b82f6","#22c55e","#f59e0b","#ef4444","#a855f7","#06b6d4","#ec4899","#f97316","#e0e0e0","#64748b"];
@@ -56,7 +34,7 @@ function hexToRgba(hex, a) {
   return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
 }
 
-// ─── Canvas drawing ───────────────────────────────────────────────────────────
+
 function toSX(v, vp) { return v * vp.scale + vp.ox; }
 function toSY(v, vp) { return v * vp.scale + vp.oy; }
 function toWX(v, vp) { return (v - vp.ox) / vp.scale; }
@@ -191,7 +169,7 @@ function buildDraft(tool, sx, sy, ex, ey, shift) {
   return null;
 }
 
-// ─── SaveStatus ────────────────────────────────────────────────────────────────
+
 function SaveStatus({ status }) {
   if (status==="saving")  return <span className="flex items-center gap-1.5 text-[11px] text-gray-500"><Loader2 size={12} className="animate-spin"/>Saving…</span>;
   if (status==="saved")   return <span className="flex items-center gap-1.5 text-[11px] text-emerald-400"><CheckCircle2 size={12}/>Saved</span>;
@@ -199,7 +177,7 @@ function SaveStatus({ status }) {
   return null;
 }
 
-// ─── Rich Toolbar ─────────────────────────────────────────────────────────────
+
 function RichToolbar({ editorRef }) {
   const [fontSize, setFontSize] = useState("3");
   function exec(cmd, val=null) { const el=editorRef?.current; if(!el) return; el.focus(); document.execCommand(cmd,false,val); }
@@ -223,7 +201,7 @@ function RichToolbar({ editorRef }) {
     ],[
       {icon:Code,        label:"Code",      action:()=>exec("formatBlock","<pre>")},
       {icon:Link,        label:"Link",      action:()=>{ const u=prompt("URL:","https://"); if(u) exec("createLink",u); }},
-      {icon:Highlighter, label:"Highlight", action:()=>exec("backColor","#fbbf24")},
+      {icon:Highlighter, label:"Highlight", action:()=>exec("backColor","none")},
     ],
   ];
   return (
@@ -260,7 +238,7 @@ function RichToolbar({ editorRef }) {
   );
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+
 export default function EraserEditor({ file, onBack }) {
   const { token } = useAuth();
 
