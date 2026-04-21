@@ -1,26 +1,6 @@
 "use client";
 
-/**
- * _KonvaCanvas.jsx
- *
- * Drop this file next to EraserEditor.js
- *
- * Install dependencies:
- *   npm install konva react-konva
- *
- * Features vs old plain-canvas approach:
- *  ✅ Drag-to-move every shape
- *  ✅ Transform handles (resize / rotate) on selection
- *  ✅ Multi-select with Shift+click
- *  ✅ Diamond shape
- *  ✅ Smooth freehand pen with perfect-freehand algorithm
- *  ✅ Snap-to-grid (hold Shift while drawing)
- *  ✅ Zoom & pan (scroll to zoom, middle-click drag)
- *  ✅ Keyboard shortcuts: V R O D A P T, Delete/Backspace
- *  ✅ Undo/Redo (Ctrl+Z / Ctrl+Y)
- *  ✅ Shape color picker in floating properties panel
- *  ✅ Connector arrows between shapes (click source → click target)
- */
+
 
 import React, {
   useState, useRef, useEffect, useCallback,
