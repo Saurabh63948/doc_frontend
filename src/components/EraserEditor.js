@@ -1,6 +1,7 @@
 "use client";
 
 
+
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Share2, Sparkles, Zap, ChevronLeft, MoreHorizontal,
@@ -13,7 +14,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
-
+// ─── API ──────────────────────────────────────────────────────────────────────
 const BASE = process.env.NEXT_PUBLIC_API_URL || "https://doc-backend-ouhr.onrender.com";
 async function apiFetch(path, token, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
@@ -24,7 +25,7 @@ async function apiFetch(path, token, options = {}) {
   return res.json();
 }
 
-
+// ─── Misc helpers ─────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2, 10); }
 
 const PALETTE = ["#3b82f6","#22c55e","#f59e0b","#ef4444","#a855f7","#06b6d4","#ec4899","#f97316","#e0e0e0","#64748b"];
@@ -34,7 +35,7 @@ function hexToRgba(hex, a) {
   return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
 }
 
-
+// ─── Canvas drawing ───────────────────────────────────────────────────────────
 function toSX(v, vp) { return v * vp.scale + vp.ox; }
 function toSY(v, vp) { return v * vp.scale + vp.oy; }
 function toWX(v, vp) { return (v - vp.ox) / vp.scale; }
@@ -169,7 +170,7 @@ function buildDraft(tool, sx, sy, ex, ey, shift) {
   return null;
 }
 
-
+// ─── SaveStatus ────────────────────────────────────────────────────────────────
 function SaveStatus({ status }) {
   if (status==="saving")  return <span className="flex items-center gap-1.5 text-[11px] text-gray-500"><Loader2 size={12} className="animate-spin"/>Saving…</span>;
   if (status==="saved")   return <span className="flex items-center gap-1.5 text-[11px] text-emerald-400"><CheckCircle2 size={12}/>Saved</span>;
@@ -177,7 +178,7 @@ function SaveStatus({ status }) {
   return null;
 }
 
-
+// ─── Rich Toolbar ─────────────────────────────────────────────────────────────
 function RichToolbar({ editorRef }) {
   const [fontSize, setFontSize] = useState("3");
   function exec(cmd, val=null) { const el=editorRef?.current; if(!el) return; el.focus(); document.execCommand(cmd,false,val); }
@@ -238,7 +239,7 @@ function RichToolbar({ editorRef }) {
   );
 }
 
-
+// ─── Main ─────────────────────────────────────────────────────────────────────
 export default function EraserEditor({ file, onBack }) {
   const { token } = useAuth();
 
@@ -262,6 +263,7 @@ export default function EraserEditor({ file, onBack }) {
   const spaceDown      = useRef(false);
   const inlineInputRef = useRef(null);
   const docBodyRef     = useRef(null);
+  const docScrollRef   = useRef(null);
   const saveTimer      = useRef(null);
   const shapesRef      = useRef(shapes);
   const vpRef          = useRef(vp);
@@ -274,17 +276,29 @@ export default function EraserEditor({ file, onBack }) {
   useEffect(()=>{selIdxRef.current=selectedIdx;},[selectedIdx]);
   useEffect(()=>{if(docBodyRef.current&&file?.doc_content)docBodyRef.current.innerHTML=file.doc_content;},[]);// eslint-disable-line
 
+  function preserveScroll(fn) {
+    const el = docScrollRef.current;
+    const top = el ? el.scrollTop : 0;
+    fn();
+    requestAnimationFrame(() => { if(el) el.scrollTop = top; });
+  }
+
   const scheduleSave=useCallback(()=>{
-    setSaveStatus("unsaved"); clearTimeout(saveTimer.current);
+    preserveScroll(() => setSaveStatus("unsaved"));
+    clearTimeout(saveTimer.current);
     saveTimer.current=setTimeout(saveToServer,2000);
   },[]); // eslint-disable-line
 
   async function saveToServer() {
-    if(!file?.id||!token) return; setSaveStatus("saving");
+    if(!file?.id||!token) return;
+    preserveScroll(() => setSaveStatus("saving"));
     try {
       await apiFetch(`/api/files/${file.id}`,token,{method:"PATCH",body:JSON.stringify({doc_content:docBodyRef.current?.innerHTML||"",canvas_data:JSON.stringify(shapesRef.current)})});
-      setSaveStatus("saved"); setTimeout(()=>setSaveStatus("idle"),3000);
-    } catch { setSaveStatus("unsaved"); }
+      preserveScroll(() => setSaveStatus("saved"));
+      setTimeout(() => preserveScroll(() => setSaveStatus("idle")), 3000);
+    } catch {
+      preserveScroll(() => setSaveStatus("unsaved"));
+    }
   }
 
   function pushHistory(s){ history.current=history.current.slice(0,histIdx.current+1); history.current.push(JSON.stringify(s)); histIdx.current=history.current.length-1; }
@@ -487,7 +501,7 @@ export default function EraserEditor({ file, onBack }) {
         {showDoc && (
           <section className={`flex flex-col h-full ${activeTab==="both"?"w-1/2 border-r border-white/[0.05]":"w-full"}`} style={{background:"#111"}}>
             <RichToolbar editorRef={docBodyRef}/>
-            <div className="flex-1 overflow-y-auto" style={{scrollbarWidth:"thin",scrollbarColor:"rgba(255,255,255,0.08) transparent"}}>
+            <div ref={docScrollRef} className="flex-1 overflow-y-auto" style={{scrollbarWidth:"thin",scrollbarColor:"rgba(255,255,255,0.08) transparent"}}>
               <div className="max-w-2xl mx-auto px-10 py-10">
                 <div contentEditable suppressContentEditableWarning data-placeholder="Untitled" spellCheck={false} onInput={scheduleSave}
                   className="text-[2.2rem] font-black text-white mb-2 outline-none leading-tight empty:before:content-[attr(data-placeholder)] empty:before:text-white/15"
