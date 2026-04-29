@@ -448,7 +448,7 @@ export default function EraserEditor({ file, onBack }) {
   function updateShapeColor(color){ if(selectedIdx===null) return; commitShapes(prev=>prev.map((s,i)=>i===selectedIdx?{...s,stroke:color}:s)); }
 
   const showDoc    = activeTab==="document"||activeTab==="both";
-  const showCanvas = activeTab==="canvas"  ||activeTab==="both";
+  const showCanvas = activeTab==="both"  ||activeTab==="both";
   const cursorStyle= panning.current||spaceDown.current?"grab":activeTool==="select"?"default":"crosshair";
   const selShape   = selectedIdx!==null?shapes[selectedIdx]:null;
   // Inline text in screen coords
