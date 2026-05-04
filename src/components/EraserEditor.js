@@ -1,7 +1,5 @@
 "use client";
 
-
-
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Share2, Sparkles, Zap, ChevronLeft, MoreHorizontal,
@@ -202,7 +200,7 @@ function RichToolbar({ editorRef }) {
     ],[
       {icon:Code,        label:"Code",      action:()=>exec("formatBlock","<pre>")},
       {icon:Link,        label:"Link",      action:()=>{ const u=prompt("URL:","https://"); if(u) exec("createLink",u); }},
-      {icon:Highlighter, label:"Highlight", action:()=>exec("backColor","none")},
+      {icon:Highlighter, label:"Highlight", action:()=>exec("backColor","#fef08a")},
     ],
   ];
   return (
@@ -274,7 +272,13 @@ export default function EraserEditor({ file, onBack }) {
   useEffect(()=>{shapesRef.current=shapes;},[shapes]);
   useEffect(()=>{vpRef.current=vp;},[vp]);
   useEffect(()=>{selIdxRef.current=selectedIdx;},[selectedIdx]);
-  useEffect(()=>{if(docBodyRef.current&&file?.doc_content)docBodyRef.current.innerHTML=file.doc_content;},[]);// eslint-disable-line
+
+  // ── FIX: Only set innerHTML once on mount, never re-run ──
+  useEffect(()=>{
+    if(docBodyRef.current && file?.doc_content) {
+      docBodyRef.current.innerHTML = file.doc_content;
+    }
+  },[]); // eslint-disable-line
 
   function preserveScroll(fn) {
     const el = docScrollRef.current;
@@ -293,7 +297,10 @@ export default function EraserEditor({ file, onBack }) {
     if(!file?.id||!token) return;
     preserveScroll(() => setSaveStatus("saving"));
     try {
-      await apiFetch(`/api/files/${file.id}`,token,{method:"PATCH",body:JSON.stringify({doc_content:docBodyRef.current?.innerHTML||"",canvas_data:JSON.stringify(shapesRef.current)})});
+      await apiFetch(`/api/files/${file.id}`,token,{method:"PATCH",body:JSON.stringify({
+        doc_content: docBodyRef.current?.innerHTML || "",
+        canvas_data: JSON.stringify(shapesRef.current)
+      })});
       preserveScroll(() => setSaveStatus("saved"));
       setTimeout(() => preserveScroll(() => setSaveStatus("idle")), 3000);
     } catch {
@@ -304,11 +311,36 @@ export default function EraserEditor({ file, onBack }) {
   function pushHistory(s){ history.current=history.current.slice(0,histIdx.current+1); history.current.push(JSON.stringify(s)); histIdx.current=history.current.length-1; }
   function commitShapes(fn){ setShapes(prev=>{ const n=fn(prev); pushHistory(n); return n; }); scheduleSave(); }
 
-  // Canvas resize
+  // ── FIX: Canvas resize — skip if parent has no size (display:none) ──
   useEffect(()=>{
-    function resize(){ const c=canvasRef.current; if(!c) return; c.width=c.parentElement.offsetWidth; c.height=c.parentElement.offsetHeight; redraw(); }
-    resize(); window.addEventListener("resize",resize); return ()=>window.removeEventListener("resize",resize);
+    function resize(){
+      const c=canvasRef.current;
+      if(!c||!c.parentElement) return;
+      const w=c.parentElement.offsetWidth;
+      const h=c.parentElement.offsetHeight;
+      if(!w||!h) return; // skip when hidden (display:none → 0x0)
+      c.width=w; c.height=h;
+      redraw();
+    }
+    resize();
+    window.addEventListener("resize",resize);
+    return ()=>window.removeEventListener("resize",resize);
   },[]); // eslint-disable-line
+
+  // ── FIX: Re-size canvas when switching to canvas/both tab ──
+  useEffect(()=>{
+    if(activeTab==="canvas"||activeTab==="both"){
+      requestAnimationFrame(()=>{
+        const c=canvasRef.current;
+        if(!c||!c.parentElement) return;
+        const w=c.parentElement.offsetWidth;
+        const h=c.parentElement.offsetHeight;
+        if(!w||!h) return;
+        c.width=w; c.height=h;
+        redraw();
+      });
+    }
+  },[activeTab]); // eslint-disable-line
 
   // Redraw on state changes
   useEffect(()=>{ redraw(); });
@@ -447,13 +479,18 @@ export default function EraserEditor({ file, onBack }) {
 
   function updateShapeColor(color){ if(selectedIdx===null) return; commitShapes(prev=>prev.map((s,i)=>i===selectedIdx?{...s,stroke:color}:s)); }
 
-  const showDoc    = activeTab==="document"||activeTab==="both";
-  const showCanvas = activeTab==="both"  ||activeTab==="both";
-  const cursorStyle= panning.current||spaceDown.current?"grab":activeTool==="select"?"default":"crosshair";
-  const selShape   = selectedIdx!==null?shapes[selectedIdx]:null;
+  // ── FIX: Corrected visibility logic ──
+  // Doc section: visible in "document" or "both"
+  // Canvas section: visible in "canvas" or "both"
+  const showDoc    = activeTab === "document" || activeTab === "both";
+  const showCanvas = activeTab === "canvas"   || activeTab === "both";
+
+  const cursorStyle = panning.current || spaceDown.current ? "grab" : activeTool==="select" ? "default" : "crosshair";
+  const selShape    = selectedIdx !== null ? shapes[selectedIdx] : null;
+
   // Inline text in screen coords
-  const ilx = inlineText ? toSX(inlineText.x,vp) : 0;
-  const ily = inlineText ? toSY(inlineText.y,vp) : 0;
+  const ilx = inlineText ? toSX(inlineText.x, vp) : 0;
+  const ily = inlineText ? toSY(inlineText.y, vp) : 0;
 
   const canvasTools = [
     {id:"select", icon:MousePointer2, label:"Select (V)"},
@@ -466,148 +503,302 @@ export default function EraserEditor({ file, onBack }) {
   ];
 
   return (
-    <div className="flex flex-col h-screen text-[#e0e0e0] font-sans overflow-hidden" style={{background:"#0f0f0f"}} onClick={()=>setCtxMenu(null)}>
+    <div
+      className="flex flex-col h-screen text-[#e0e0e0] font-sans overflow-hidden"
+      style={{background:"#0f0f0f"}}
+      onClick={()=>setCtxMenu(null)}
+    >
 
       {/* NAV */}
       <nav className="h-12 border-b border-white/[0.06] flex items-center justify-between px-4 bg-[#141414] z-50 flex-shrink-0">
         <div className="flex items-center gap-3 min-w-0">
-          <button onClick={onBack} className="hover:bg-white/8 p-1.5 rounded-lg transition-colors text-gray-400 hover:text-white"><ChevronLeft size={18}/></button>
+          <button onClick={onBack} className="hover:bg-white/8 p-1.5 rounded-lg transition-colors text-gray-400 hover:text-white">
+            <ChevronLeft size={18}/>
+          </button>
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-blue-600 rounded-md flex items-center justify-center shadow-lg shadow-blue-900/40"><Zap size={13} className="text-white fill-current"/></div>
+            <div className="w-6 h-6 bg-blue-600 rounded-md flex items-center justify-center shadow-lg shadow-blue-900/40">
+              <Zap size={13} className="text-white fill-current"/>
+            </div>
             <span className="text-sm font-semibold text-gray-100 truncate max-w-[200px]">{file?.name||"Untitled"}</span>
             <MoreHorizontal size={14} className="text-gray-600 cursor-pointer hover:text-gray-400"/>
           </div>
           <div className="ml-2"><SaveStatus status={saveStatus}/></div>
         </div>
+
         <div className="flex bg-[#0f0f0f] border border-white/[0.08] rounded-lg p-1 gap-0.5">
-          {[{id:"document",label:"Document",icon:FileText},{id:"both",label:"Both",icon:Layout},{id:"canvas",label:"Canvas",icon:Monitor}].map(tab=>(
+          {[
+            {id:"document", label:"Document", icon:FileText},
+            {id:"both",     label:"Both",     icon:Layout},
+            {id:"canvas",   label:"Canvas",   icon:Monitor},
+          ].map(tab=>(
             <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
               className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-bold transition-all ${activeTab===tab.id?"bg-[#252525] text-white shadow":"text-gray-500 hover:text-gray-300"}`}>
               <tab.icon size={12}/> {tab.label}
             </button>
           ))}
         </div>
+
         <div className="flex items-center gap-2">
-          <button onClick={saveToServer} className="text-[11px] font-semibold border border-white/10 px-3 py-1.5 rounded-lg hover:bg-white/5 flex items-center gap-2 transition-colors text-gray-400 hover:text-white"><Save size={13}/> Save</button>
-          <button className="text-[11px] font-semibold border border-white/10 px-3 py-1.5 rounded-lg hover:bg-white/5 flex items-center gap-2 transition-colors text-gray-400 hover:text-white"><Share2 size={13}/> Share</button>
-          <button className="text-[11px] font-semibold bg-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-500 flex items-center gap-2 text-white transition-colors shadow-lg shadow-blue-900/30"><Sparkles size={13}/> AI Chat</button>
+          <button onClick={saveToServer} className="text-[11px] font-semibold border border-white/10 px-3 py-1.5 rounded-lg hover:bg-white/5 flex items-center gap-2 transition-colors text-gray-400 hover:text-white">
+            <Save size={13}/> Save
+          </button>
+          <button className="text-[11px] font-semibold border border-white/10 px-3 py-1.5 rounded-lg hover:bg-white/5 flex items-center gap-2 transition-colors text-gray-400 hover:text-white">
+            <Share2 size={13}/> Share
+          </button>
+          <button className="text-[11px] font-semibold bg-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-500 flex items-center gap-2 text-white transition-colors shadow-lg shadow-blue-900/30">
+            <Sparkles size={13}/> AI Chat
+          </button>
         </div>
       </nav>
 
-      {/* CONTENT */}
+      {/* CONTENT — always render both panels, use display:none to hide ──────── */}
+      {/* This is the KEY FIX: sections are never unmounted so innerHTML is preserved */}
       <div className="flex flex-1 overflow-hidden">
 
-        {/* DOC */}
-        {showDoc && (
-          <section className={`flex flex-col h-full ${activeTab==="both"?"w-1/2 border-r border-white/[0.05]":"w-full"}`} style={{background:"#111"}}>
-            <RichToolbar editorRef={docBodyRef}/>
-            <div ref={docScrollRef} className="flex-1 overflow-y-auto" style={{scrollbarWidth:"thin",scrollbarColor:"rgba(255,255,255,0.08) transparent"}}>
-              <div className="max-w-2xl mx-auto px-10 py-10">
-                <div contentEditable suppressContentEditableWarning data-placeholder="Untitled" spellCheck={false} onInput={scheduleSave}
-                  className="text-[2.2rem] font-black text-white mb-2 outline-none leading-tight empty:before:content-[attr(data-placeholder)] empty:before:text-white/15"
-                  ref={el=>{if(el&&!el.dataset.initialized){el.dataset.initialized="1";el.textContent=file?.name||"";}}}/>
-                <div className="text-xs text-white/20 mb-8 pb-6 border-b border-white/5">Last edited just now</div>
-                <div ref={docBodyRef} contentEditable suppressContentEditableWarning className="outline-none min-h-[60vh] doc-body" spellCheck={false} onInput={scheduleSave}/>
+        {/* ── DOC SECTION ── always in DOM, hidden via style when not active ── */}
+        <section
+          className="flex flex-col h-full border-r border-white/[0.05] transition-all duration-300"
+          style={{
+            background: "#111",
+            // ── FIX: use display:none instead of conditional render ──
+            display: showDoc ? "flex" : "none",
+            width: activeTab === "document" ? "100%" : "50%",
+          }}
+        >
+          <RichToolbar editorRef={docBodyRef}/>
+          <div
+            ref={docScrollRef}
+            className="flex-1 overflow-y-auto"
+            style={{scrollbarWidth:"thin", scrollbarColor:"rgba(255,255,255,0.08) transparent"}}
+          >
+            <div className="max-w-2xl mx-auto px-10 py-10">
+              <div
+                contentEditable
+                suppressContentEditableWarning
+                data-placeholder="Untitled"
+                spellCheck={false}
+                onInput={scheduleSave}
+                className="text-[2.2rem] font-black text-white mb-2 outline-none leading-tight empty:before:content-[attr(data-placeholder)] empty:before:text-white/15"
+                ref={el=>{
+                  if(el&&!el.dataset.initialized){
+                    el.dataset.initialized="1";
+                    el.textContent=file?.name||"";
+                  }
+                }}
+              />
+              <div className="text-xs text-white/20 mb-8 pb-6 border-b border-white/5">Last edited just now</div>
+              <div
+                ref={docBodyRef}
+                contentEditable
+                suppressContentEditableWarning
+                className="outline-none min-h-[60vh] doc-body"
+                spellCheck={false}
+                onInput={scheduleSave}
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* ── CANVAS SECTION ── always in DOM, hidden via style when not active ── */}
+        <section
+          className="h-full relative overflow-hidden transition-all duration-300"
+          style={{
+            background: "#0b0b0b",
+            // ── FIX: use display:none instead of conditional render ──
+            display: showCanvas ? "block" : "none",
+            // ── FIX: flex:1 so it takes remaining space, not full 100% ──
+            flex: activeTab === "canvas" ? "none" : "1",
+            width: activeTab === "canvas" ? "100%" : undefined,
+          }}
+        >
+          {/* Dot-grid background */}
+          <div className="absolute inset-0 pointer-events-none" style={{
+            backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px)",
+            backgroundSize: "28px 28px",
+          }}/>
+
+          {/* Tool sidebar */}
+          <div
+            className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-1 p-2 rounded-2xl shadow-2xl z-20 border border-white/[0.06]"
+            style={{background:"#161616"}}
+          >
+            {canvasTools.map(tool=>(
+              <button key={tool.id}
+                onClick={()=>{setActiveTool(tool.id);setSelectedIdx(null);}}
+                title={tool.label}
+                className={`p-2 rounded-xl transition-all ${activeTool===tool.id?"bg-blue-600 text-white shadow-lg shadow-blue-900/50":"hover:bg-white/8 text-gray-500 hover:text-gray-200"}`}>
+                <tool.icon size={17}/>
+              </button>
+            ))}
+            <div className="w-full h-px bg-white/5 my-1"/>
+            <button
+              onClick={()=>{commitShapes(()=>[]);setSelectedIdx(null);}}
+              title="Clear all"
+              className="p-2 rounded-xl hover:bg-red-900/30 text-gray-600 hover:text-red-400 transition-all"
+            >
+              <Trash2 size={17}/>
+            </button>
+          </div>
+
+          {/* Zoom controls */}
+          <div
+            className="absolute bottom-6 right-6 flex items-center gap-1 p-1.5 rounded-xl border border-white/[0.06] shadow-xl z-20"
+            style={{background:"#161616"}}
+          >
+            <button onClick={()=>setVp(v=>({...v,scale:Math.min(v.scale*1.2,8)}))} className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/8 transition-all"><ZoomIn size={15}/></button>
+            <span className="text-[11px] text-gray-500 w-11 text-center font-mono">{Math.round(vp.scale*100)}%</span>
+            <button onClick={()=>setVp(v=>({...v,scale:Math.max(v.scale/1.2,0.15)}))} className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/8 transition-all"><ZoomOut size={15}/></button>
+            <div className="w-px h-4 bg-white/10 mx-1"/>
+            <button onClick={()=>setVp({ox:0,oy:0,scale:1})} className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/8 transition-all"><RotateCcw size={14}/></button>
+          </div>
+
+          {/* AI generate button */}
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+            <button
+              className="pointer-events-auto flex items-center gap-3 px-5 py-2.5 rounded-2xl text-sm font-semibold hover:border-blue-500 transition-all shadow-2xl border"
+              style={{background:"#161616", borderColor:"#2a2a2a"}}
+            >
+              <Sparkles size={15} className="text-blue-400"/>
+              <span className="text-gray-200">Generate AI Diagram</span>
+              <kbd className="text-[10px] bg-[#222] px-1.5 py-0.5 rounded text-gray-500 border border-white/10">⌘ J</kbd>
+            </button>
+          </div>
+
+          {/* Canvas element */}
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 w-full h-full"
+            style={{cursor:cursorStyle}}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onContextMenu={handleContextMenu}
+            onDoubleClick={handleDoubleClick}
+          />
+
+          {/* Inline text input */}
+          {inlineText && (
+            <textarea
+              ref={inlineInputRef}
+              autoFocus
+              value={inlineText.value}
+              rows={1}
+              onChange={e=>{
+                setInlineText(t=>({...t,value:e.target.value}));
+                e.target.style.height="auto";
+                e.target.style.height=e.target.scrollHeight+"px";
+              }}
+              onBlur={commitInlineText}
+              onKeyDown={e=>{
+                if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();commitInlineText();}
+                if(e.key==="Escape")setInlineText(null);
+              }}
+              onMouseDown={e=>e.stopPropagation()}
+              placeholder="Type here…"
+              className="absolute outline-none text-white placeholder-gray-500 resize-none overflow-hidden"
+              style={{
+                left:ilx, top:ily,
+                fontSize:`${15*vp.scale}px`,
+                lineHeight:"1.5",
+                minWidth:"160px",
+                maxWidth:"320px",
+                zIndex:40,
+                background:"rgba(15,15,25,0.9)",
+                border:"1.5px solid #3b82f6",
+                borderRadius:"6px",
+                padding:"6px 10px",
+                caretColor:"#60a5fa",
+                color:"#e0e0e0",
+                backdropFilter:"blur(4px)",
+                boxShadow:"0 0 0 3px rgba(59,130,246,0.2)",
+              }}
+            />
+          )}
+
+          {/* Properties panel */}
+          {selShape && (
+            <div
+              className="absolute top-4 right-4 w-52 rounded-2xl border border-white/[0.07] shadow-2xl p-4 flex flex-col gap-3 z-30"
+              style={{background:"#161616"}}
+              onClick={e=>e.stopPropagation()}
+            >
+              <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Properties</div>
+              <div className="text-xs text-gray-400 capitalize">{selShape.type}</div>
+              <div>
+                <div className="text-[10px] text-gray-600 mb-1.5">Color</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {PALETTE.map(c=>(
+                    <button key={c} onClick={()=>updateShapeColor(c)}
+                      className="w-5 h-5 rounded-full border-2 transition-all"
+                      style={{
+                        background:c,
+                        borderColor:selShape.stroke===c?"#fff":"transparent",
+                        boxShadow:selShape.stroke===c?`0 0 0 1px ${c}`:"none",
+                      }}/>
+                  ))}
+                </div>
               </div>
-            </div>
-          </section>
-        )}
-
-        {/* CANVAS */}
-        {showCanvas && (
-          <section className={`h-full relative overflow-hidden ${activeTab==="both"?"flex-1":"w-full"}`}
-            style={{background:"#0b0b0b",backgroundImage:"radial-gradient(circle,#1d1d1d 1px,transparent 1px)",backgroundSize:"28px 28px"}}>
-
-            {/* Tool sidebar */}
-            <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col gap-1 p-2 rounded-2xl shadow-2xl z-20 border border-white/[0.06]" style={{background:"#161616"}}>
-              {canvasTools.map(tool=>(
-                <button key={tool.id} onClick={()=>{setActiveTool(tool.id);setSelectedIdx(null);}} title={tool.label}
-                  className={`p-2 rounded-xl transition-all ${activeTool===tool.id?"bg-blue-600 text-white shadow-lg shadow-blue-900/50":"hover:bg-white/8 text-gray-500 hover:text-gray-200"}`}>
-                  <tool.icon size={17}/>
-                </button>
-              ))}
-              <div className="w-full h-px bg-white/5 my-1"/>
-              <button onClick={()=>{commitShapes(()=>[]);setSelectedIdx(null);}} title="Clear all"
-                className="p-2 rounded-xl hover:bg-red-900/30 text-gray-600 hover:text-red-400 transition-all"><Trash2 size={17}/></button>
-            </div>
-
-            {/* Zoom controls */}
-            <div className="absolute bottom-6 right-6 flex items-center gap-1 p-1.5 rounded-xl border border-white/[0.06] shadow-xl z-20" style={{background:"#161616"}}>
-              <button onClick={()=>setVp(v=>({...v,scale:Math.min(v.scale*1.2,8)}))} className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/8 transition-all"><ZoomIn size={15}/></button>
-              <span className="text-[11px] text-gray-500 w-11 text-center font-mono">{Math.round(vp.scale*100)}%</span>
-              <button onClick={()=>setVp(v=>({...v,scale:Math.max(v.scale/1.2,0.15)}))} className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/8 transition-all"><ZoomOut size={15}/></button>
-              <div className="w-px h-4 bg-white/10 mx-1"/>
-              <button onClick={()=>setVp({ox:0,oy:0,scale:1})} className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/8 transition-all"><RotateCcw size={14}/></button>
-            </div>
-
-            {/* AI button */}
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
-              <button className="pointer-events-auto flex items-center gap-3 px-5 py-2.5 rounded-2xl text-sm font-semibold hover:border-blue-500 transition-all shadow-2xl border" style={{background:"#161616",borderColor:"#2a2a2a"}}>
-                <Sparkles size={15} className="text-blue-400"/>
-                <span className="text-gray-200">Generate AI Diagram</span>
-                <kbd className="text-[10px] bg-[#222] px-1.5 py-0.5 rounded text-gray-500 border border-white/10">⌘ J</kbd>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-gray-600">Custom</span>
+                <input type="color" value={selShape.stroke||"#3b82f6"}
+                  onChange={e=>updateShapeColor(e.target.value)}
+                  className="w-7 h-7 rounded cursor-pointer bg-transparent border border-white/10"/>
+              </div>
+              <button
+                onClick={()=>{commitShapes(p=>p.filter((_,i)=>i!==selectedIdx));setSelectedIdx(null);}}
+                className="mt-1 text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1.5 hover:bg-red-900/20 rounded-lg px-2 py-1.5 transition-all"
+              >
+                🗑️ Delete shape
               </button>
             </div>
+          )}
 
-            {/* Canvas element */}
-            <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{cursor:cursorStyle}}
-              onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
-              onContextMenu={handleContextMenu} onDoubleClick={handleDoubleClick}/>
-
-            {/* Inline text */}
-            {inlineText && (
-              <textarea ref={inlineInputRef} autoFocus value={inlineText.value} rows={1}
-                onChange={e=>{setInlineText(t=>({...t,value:e.target.value}));e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}}
-                onBlur={commitInlineText}
-                onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();commitInlineText();}if(e.key==="Escape")setInlineText(null);}}
-                onMouseDown={e=>e.stopPropagation()} placeholder="Type here…"
-                className="absolute outline-none text-white placeholder-gray-500 resize-none overflow-hidden"
-                style={{left:ilx,top:ily,fontSize:`${15*vp.scale}px`,lineHeight:"1.5",minWidth:"160px",maxWidth:"320px",zIndex:40,background:"rgba(15,15,25,0.9)",border:"1.5px solid #3b82f6",borderRadius:"6px",padding:"6px 10px",caretColor:"#60a5fa",color:"#e0e0e0",backdropFilter:"blur(4px)",boxShadow:"0 0 0 3px rgba(59,130,246,0.2)"}}/>
-            )}
-
-            {/* Properties panel */}
-            {selShape && (
-              <div className="absolute top-4 right-4 w-52 rounded-2xl border border-white/[0.07] shadow-2xl p-4 flex flex-col gap-3 z-30" style={{background:"#161616"}} onClick={e=>e.stopPropagation()}>
-                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Properties</div>
-                <div className="text-xs text-gray-400 capitalize">{selShape.type}</div>
-                <div>
-                  <div className="text-[10px] text-gray-600 mb-1.5">Color</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {PALETTE.map(c=>(
-                      <button key={c} onClick={()=>updateShapeColor(c)} className="w-5 h-5 rounded-full border-2 transition-all"
-                        style={{background:c,borderColor:selShape.stroke===c?"#fff":"transparent",boxShadow:selShape.stroke===c?`0 0 0 1px ${c}`:"none"}}/>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-gray-600">Custom</span>
-                  <input type="color" value={selShape.stroke||"#3b82f6"} onChange={e=>updateShapeColor(e.target.value)} className="w-7 h-7 rounded cursor-pointer bg-transparent border border-white/10"/>
-                </div>
-                <button onClick={()=>{commitShapes(p=>p.filter((_,i)=>i!==selectedIdx));setSelectedIdx(null);}}
-                  className="mt-1 text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1.5 hover:bg-red-900/20 rounded-lg px-2 py-1.5 transition-all">🗑️ Delete shape</button>
-              </div>
-            )}
-
-            {/* Context menu */}
-            {ctxMenu && (
-              <div className="absolute rounded-xl shadow-2xl py-1.5 z-50 w-48 border border-white/[0.08]" style={{left:ctxMenu.x,top:ctxMenu.y,background:"#1e1e1e"}} onClick={e=>e.stopPropagation()}>
-                {[
-                  {label:"✏️ Edit label",action:()=>{const s=shapes[ctxMenu.idx];setInlineText({x:s.x+10,y:s.y+10,value:s.label||s.text||"",editIdx:ctxMenu.idx});setCtxMenu(null);}},
-                  {label:"📋 Duplicate",action:()=>{
+          {/* Context menu */}
+          {ctxMenu && (
+            <div
+              className="absolute rounded-xl shadow-2xl py-1.5 z-50 w-48 border border-white/[0.08]"
+              style={{left:ctxMenu.x, top:ctxMenu.y, background:"#1e1e1e"}}
+              onClick={e=>e.stopPropagation()}
+            >
+              {[
+                {
+                  label:"✏️ Edit label",
+                  action:()=>{
                     const s=shapes[ctxMenu.idx];
-                    const copy=s.type==="pen"?{...s,id:uid(),pts:s.pts.map(p=>({x:p.x+20,y:p.y+20}))}:s.type==="arrow"?{...s,id:uid(),x:s.x+20,y:s.y+20,x2:s.x2+20,y2:s.y2+20}:{...s,id:uid(),x:s.x+20,y:s.y+20};
-                    commitShapes(p=>[...p,copy]);setCtxMenu(null);}},
-                ].map((item,i)=>(
-                  <button key={i} onClick={item.action} className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/8 flex items-center gap-2 transition-colors">{item.label}</button>
-                ))}
-                <div className="h-px bg-white/5 mx-2 my-1"/>
-                <button onClick={()=>{commitShapes(p=>p.filter((_,i)=>i!==ctxMenu.idx));setSelectedIdx(null);setCtxMenu(null);}}
-                  className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-900/30 flex items-center gap-2 transition-colors">🗑️ Delete</button>
-              </div>
-            )}
-          </section>
-        )}
+                    setInlineText({x:s.x+10,y:s.y+10,value:s.label||s.text||"",editIdx:ctxMenu.idx});
+                    setCtxMenu(null);
+                  }
+                },
+                {
+                  label:"📋 Duplicate",
+                  action:()=>{
+                    const s=shapes[ctxMenu.idx];
+                    const copy = s.type==="pen"
+                      ? {...s,id:uid(),pts:s.pts.map(p=>({x:p.x+20,y:p.y+20}))}
+                      : s.type==="arrow"
+                      ? {...s,id:uid(),x:s.x+20,y:s.y+20,x2:s.x2+20,y2:s.y2+20}
+                      : {...s,id:uid(),x:s.x+20,y:s.y+20};
+                    commitShapes(p=>[...p,copy]);
+                    setCtxMenu(null);
+                  }
+                },
+              ].map((item,i)=>(
+                <button key={i} onClick={item.action}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/8 flex items-center gap-2 transition-colors">
+                  {item.label}
+                </button>
+              ))}
+              <div className="h-px bg-white/5 mx-2 my-1"/>
+              <button
+                onClick={()=>{commitShapes(p=>p.filter((_,i)=>i!==ctxMenu.idx));setSelectedIdx(null);setCtxMenu(null);}}
+                className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-900/30 flex items-center gap-2 transition-colors"
+              >
+                🗑️ Delete
+              </button>
+            </div>
+          )}
+        </section>
       </div>
 
       <style>{`
